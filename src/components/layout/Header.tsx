@@ -23,44 +23,50 @@ export const Header: React.FC<HeaderProps> = ({
 }) => {
   const remaining = totalIn - totalOut;
   const savedLabel = (() => {
-    if (saveStatus === 'saving') {
-      return '저장 중...';
-    }
-    if (saveStatus === 'error') {
-      return '저장 실패';
-    }
-    if (lastSavedAt) {
-      return `저장됨: ${new Date(lastSavedAt).toLocaleTimeString('ko-KR')}`;
-    }
-    return '저장됨: -';
+    if (saveStatus === 'saving') return 'saving...';
+    if (saveStatus === 'error') return 'error';
+    if (lastSavedAt) return new Date(lastSavedAt).toLocaleTimeString('ko-KR');
+    return '-';
   })();
 
   return (
     <header className="app-header">
       <div className="app-header-left">
-        <div className="app-title">Money Flow Planner</div>
-        <label>
-          월 선택
-          <input
-            type="month"
-            value={month}
-            onChange={(event) => onChangeMonth(event.target.value)}
-          />
-        </label>
-        <label>
-          시나리오
-          <input
-            type="text"
-            value={scenarioName}
-            onChange={(event) => onChangeScenario(event.target.value)}
-          />
-        </label>
+        <div className="app-title">Money Flow</div>
+        <div className="header-controls">
+          <div className="header-field">
+            <input
+              type="month"
+              value={month}
+              onChange={(event) => onChangeMonth(event.target.value)}
+            />
+          </div>
+          <div className="header-field">
+            <input
+              type="text"
+              value={scenarioName}
+              onChange={(event) => onChangeScenario(event.target.value)}
+              placeholder="시나리오 이름"
+            />
+          </div>
+        </div>
       </div>
       <div className="app-header-right">
-        <div>이번 달 들어오는 돈: {totalIn.toLocaleString('ko-KR')}원</div>
-        <div>이체 합계: {totalOut.toLocaleString('ko-KR')}원</div>
-        <div>남는 돈: {remaining.toLocaleString('ko-KR')}원</div>
-        <div>{savedLabel}</div>
+        <div className="header-stat">
+          <span className="header-stat-label">수입</span>
+          <span className="header-stat-value header-stat-in">{totalIn.toLocaleString('ko-KR')}원</span>
+        </div>
+        <div className="header-stat">
+          <span className="header-stat-label">이체</span>
+          <span className="header-stat-value header-stat-out">{totalOut.toLocaleString('ko-KR')}원</span>
+        </div>
+        <div className="header-stat">
+          <span className="header-stat-label">잔액</span>
+          <span className={`header-stat-value ${remaining >= 0 ? 'header-stat-positive' : 'header-stat-negative'}`}>
+            {remaining.toLocaleString('ko-KR')}원
+          </span>
+        </div>
+        <span className="header-save-status">{savedLabel}</span>
       </div>
     </header>
   );

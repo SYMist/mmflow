@@ -20,6 +20,7 @@ interface FlowCanvasProps {
   edges: FlowEdgeData[];
   selectedNodeId?: string;
   selectedEdgeId?: string;
+  editingNodeId?: string;
   onSelectNode: (id: string) => void;
   onSelectEdge: (id: string) => void;
   onOpenNodeMenu: (payload: { x: number; y: number; nodeId: string }) => void;
@@ -37,6 +38,13 @@ interface FlowCanvasProps {
   onUpdateEdgeAmount: (edgeId: string, amount: number) => void;
   onReconnectEdge: (edgeId: string, connection: Connection) => void;
   onDeleteEdge: (edgeId: string) => void;
+  onRenameNode: (id: string, name: string) => void;
+  onChangeBankName: (id: string, bankName: string) => void;
+  onChangeNodeAmount: (id: string, amount: number) => void;
+  onDeleteNode: (id: string) => void;
+  onStartEditNode: (id: string) => void;
+  onCommitEditNode: () => void;
+  onCancelEditNode: () => void;
 }
 
 export const FlowCanvas: React.FC<FlowCanvasProps> = ({
@@ -44,6 +52,7 @@ export const FlowCanvas: React.FC<FlowCanvasProps> = ({
   edges,
   selectedNodeId,
   selectedEdgeId,
+  editingNodeId,
   onSelectNode,
   onSelectEdge,
   onOpenNodeMenu,
@@ -56,6 +65,13 @@ export const FlowCanvas: React.FC<FlowCanvasProps> = ({
   onUpdateEdgeAmount,
   onReconnectEdge,
   onDeleteEdge,
+  onRenameNode,
+  onChangeBankName,
+  onChangeNodeAmount,
+  onDeleteNode,
+  onStartEditNode,
+  onCommitEditNode,
+  onCancelEditNode,
 }: FlowCanvasProps) => {
   const { screenToFlowPosition } = useReactFlow();
   const [rfNodes, setRfNodes, onNodesChange] = useNodesState<RFNode>([]);
@@ -108,12 +124,11 @@ export const FlowCanvas: React.FC<FlowCanvasProps> = ({
     };
   }, [onOpenNodeMenu, onOpenPaneMenu, onSelectNode, screenToFlowPosition]);
 
-  // 노드 메타데이터(항목명, 은행 이름, 금액, 새로 추가된 노드 등)를
-  // React Flow 노드 상태에 병합
   useEffect(() => {
     setRfNodes((previousNodes) =>
       nodes.map((node: FlowNodeData, index: number) => {
         const existing = previousNodes.find((rfNode) => rfNode.id === node.id);
+        const isEditing = node.id === editingNodeId;
 
         return {
           id: node.id,
@@ -124,7 +139,14 @@ export const FlowCanvas: React.FC<FlowCanvasProps> = ({
             amount: node.amount,
             type: node.type,
             color: node.color,
+            isEditing,
             onAddNeighbor: (direction: Direction) => onAddNodeAround(node.id, direction),
+            onRename: (name: string) => onRenameNode(node.id, name),
+            onChangeBankName: (bankName: string) => onChangeBankName(node.id, bankName),
+            onChangeAmount: (amount: number) => onChangeNodeAmount(node.id, amount),
+            onDelete: () => onDeleteNode(node.id),
+            onCommitEdit: onCommitEditNode,
+            onCancelEdit: onCancelEditNode,
           },
           position:
             existing?.position ??
@@ -133,10 +155,11 @@ export const FlowCanvas: React.FC<FlowCanvasProps> = ({
               y: node.y ?? index * 80,
             } as RFNode['position']),
           selected: node.id === selectedNodeId,
+          draggable: !isEditing,
         } as RFNode;
       }),
     );
-  }, [nodes, selectedNodeId, onAddNodeAround, setRfNodes]);
+  }, [nodes, selectedNodeId, editingNodeId, onAddNodeAround, onRenameNode, onChangeBankName, onChangeNodeAmount, onDeleteNode, onCommitEditNode, onCancelEditNode, setRfNodes]);
 
   const nodeMap = useMemo(() => {
     return nodes.reduce<Record<string, FlowNodeData>>((accumulator, node) => {
@@ -150,10 +173,9 @@ export const FlowCanvas: React.FC<FlowCanvasProps> = ({
       edges.map((edge: FlowEdgeData) => {
         const fromNode = nodeMap[edge.fromNodeId];
         const toNode = nodeMap[edge.toNodeId];
-        const ratioValue =
-          fromNode?.amount && toNode?.amount
-            ? toNode.amount / fromNode.amount
-            : undefined;
+        const ratio = fromNode?.amount
+          ? (edge.amount || toNode?.amount || 0) / fromNode.amount
+          : undefined;
 
         return {
           id: edge.id,
@@ -164,7 +186,7 @@ export const FlowCanvas: React.FC<FlowCanvasProps> = ({
           type: 'moneyEdge',
           data: {
             amount: edge.amount,
-            ratio: ratioValue,
+            ratio,
             onChangeAmount: onUpdateEdgeAmount,
             onDeleteEdge,
           },
@@ -192,6 +214,7 @@ export const FlowCanvas: React.FC<FlowCanvasProps> = ({
         panOnDrag={selectedNodeId || selectedEdgeId ? [2] : true}
         style={{ width: '100%', height: '100%' }}
         onNodeClick={(_event, node) => onSelectNode(node.id)}
+        onNodeDoubleClick={(_event, node) => onStartEditNode(node.id)}
         onEdgeClick={(_event, edge) => onSelectEdge(edge.id)}
         onNodeDragStop={(_event, node) =>
           onMoveNode(node.id, node.position.x ?? 0, node.position.y ?? 0)

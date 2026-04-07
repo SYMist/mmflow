@@ -26,13 +26,12 @@ export const RuleList: React.FC<RuleListProps> = ({ edges, nodes, onSelect }) =>
         {edges.map((edge) => {
           const fromNode = nodeMap[edge.fromNodeId];
           const toNode = nodeMap[edge.toNodeId];
-          const ratioValue =
-            fromNode?.amount && toNode?.amount
-              ? toNode.amount / fromNode.amount
-              : undefined;
+          const ratio = fromNode?.amount
+            ? (edge.amount || toNode?.amount || 0) / fromNode.amount
+            : undefined;
           const ratioText =
-            ratioValue != null && Number.isFinite(ratioValue)
-              ? `${(ratioValue * 100).toFixed(2)}%`
+            ratio != null && Number.isFinite(ratio)
+              ? `${(ratio * 100).toFixed(2)}%`
               : undefined;
 
           return (

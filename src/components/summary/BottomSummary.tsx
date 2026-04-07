@@ -15,28 +15,30 @@ export const BottomSummary: React.FC<BottomSummaryProps> = ({ nodes, edges }) =>
     return accumulator;
   }, {});
 
+  if (destinations.length === 0) {
+    return null;
+  }
+
   return (
     <footer className="bottom-summary">
-      <h3>이번 달 요약</h3>
-      <table>
-        <thead>
-          <tr>
-            <th>목적지</th>
-            <th>유입 합계</th>
-          </tr>
-        </thead>
-        <tbody>
-          {destinations.map((destination) => (
-            <tr key={destination.id}>
-              <td>
-                {destination.itemName}
-                {destination.bankName ? ` · ${destination.bankName}` : ''}
-              </td>
-              <td>{(incomeByNodeId[destination.id] ?? 0).toLocaleString('ko-KR')}원</td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
+      <h3>Summary</h3>
+      <div className="summary-cards">
+        {destinations.map((destination) => {
+          const amount = incomeByNodeId[destination.id] ?? 0;
+          return (
+            <div key={destination.id} className="summary-card">
+              <span className="summary-card-dot" style={{ backgroundColor: destination.color }} />
+              <div className="summary-card-info">
+                <span className="summary-card-name">
+                  {destination.itemName}
+                  {destination.bankName ? <span className="summary-card-bank"> {destination.bankName}</span> : ''}
+                </span>
+                <span className="summary-card-amount">{amount.toLocaleString('ko-KR')}원</span>
+              </div>
+            </div>
+          );
+        })}
+      </div>
     </footer>
   );
 };
