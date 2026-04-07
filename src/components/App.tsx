@@ -110,9 +110,59 @@ export const App: React.FC = () => {
   const [saveStatus, setSaveStatus] = React.useState<
     'idle' | 'saving' | 'saved' | 'error'
   >('idle');
+  const [sidebarOpen, setSidebarOpen] = React.useState(false);
   const [contextMenu, setContextMenu] = React.useState<ContextMenuState>(null);
   const [selectedNodeId, setSelectedNodeId] = React.useState<string | undefined>();
   const [selectedEdgeId, setSelectedEdgeId] = React.useState<string | undefined>();
+  const [editingNodeId, setEditingNodeId] = React.useState<string | undefined>();
+  const editSnapshotSavedRef = React.useRef(false);
+
+  type Snapshot = { nodes: FlowNodeData[]; edges: FlowEdgeData[] };
+  const MAX_HISTORY = 50;
+  const historyRef = React.useRef<Snapshot[]>([]);
+  const futureRef = React.useRef<Snapshot[]>([]);
+  const isUndoRedoRef = React.useRef(false);
+
+  const saveSnapshot = React.useCallback(() => {
+    historyRef.current = [
+      ...historyRef.current.slice(-(MAX_HISTORY - 1)),
+      { nodes, edges },
+    ];
+    futureRef.current = [];
+  }, [nodes, edges]);
+
+  const handleUndo = React.useCallback(() => {
+    const prev = historyRef.current.pop();
+    if (!prev) return;
+    futureRef.current.push({ nodes, edges });
+    isUndoRedoRef.current = true;
+    setNodes(prev.nodes);
+    setEdges(prev.edges);
+  }, [nodes, edges]);
+
+  const handleRedo = React.useCallback(() => {
+    const next = futureRef.current.pop();
+    if (!next) return;
+    historyRef.current.push({ nodes, edges });
+    isUndoRedoRef.current = true;
+    setNodes(next.nodes);
+    setEdges(next.edges);
+  }, [nodes, edges]);
+
+  React.useEffect(() => {
+    const handler = (event: KeyboardEvent) => {
+      const mod = event.metaKey || event.ctrlKey;
+      if (!mod || event.key.toLowerCase() !== 'z') return;
+      event.preventDefault();
+      if (event.shiftKey) {
+        handleRedo();
+      } else {
+        handleUndo();
+      }
+    };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, [handleUndo, handleRedo]);
 
   React.useEffect(() => {
     const handler = (event: MouseEvent) => {
@@ -180,16 +230,13 @@ export const App: React.FC = () => {
     };
   }, [nodes, edges, month, scenarioName]);
 
-  const totalIn = React.useMemo(() => {
-    return nodes
-      .filter((node) => node.type === 'income')
-      .reduce((sum, _node) => {
-        if (_node.id === 'income-salary') {
-          return sum + 3000000;
-        }
-        return sum;
-      }, 0);
-  }, [nodes]);
+  const totalIn = React.useMemo(
+    () =>
+      nodes
+        .filter((node) => node.type === 'income')
+        .reduce((sum, node) => sum + node.amount, 0),
+    [nodes],
+  );
 
   const totalOut = React.useMemo(
     () => edges.reduce((sum, edge) => sum + edge.amount, 0),
@@ -205,13 +252,14 @@ export const App: React.FC = () => {
   );
 
   const handleAddIncome = () => {
+    saveSnapshot();
     const incomes = nodes.filter((node) => node.type === 'income');
     const incomeYs = incomes.map((node, index) => getFallbackPosition(node, index).y);
     const nextY = incomeYs.length ? Math.max(...incomeYs) + 140 : 0;
     const newIncome: FlowNodeData = {
-      id: `income-${nodes.length + 1}`,
+      id: `income-${crypto.randomUUID().slice(0, 8)}`,
       type: 'income',
-      itemName: `새 수입 ${nodes.length + 1}`,
+      itemName: '새 수입',
       bankName: '',
       amount: 0,
       color: '#6366f1',
@@ -222,13 +270,14 @@ export const App: React.FC = () => {
   };
 
   const handleAddDestination = () => {
+    saveSnapshot();
     const destinations = nodes.filter((node) => node.type === 'destination');
     const destinationYs = destinations.map((node, index) => getFallbackPosition(node, index).y);
     const nextY = destinationYs.length ? Math.max(...destinationYs) + 140 : 0;
     const newDestination: FlowNodeData = {
-      id: `dest-${nodes.length + 1}`,
+      id: `dest-${crypto.randomUUID().slice(0, 8)}`,
       type: 'destination',
-      itemName: `새 목적지 ${nodes.length + 1}`,
+      itemName: '새 목적지',
       bankName: '',
       amount: 0,
       color: '#0ea5e9',
@@ -261,12 +310,14 @@ export const App: React.FC = () => {
   };
 
   const handleRenameNode = (id: string, itemName: string) => {
+    saveSnapshot();
     setNodes((previous) =>
       previous.map((node) => (node.id === id ? { ...node, itemName } : node)),
     );
   };
 
   const handleDeleteNode = (id: string) => {
+    saveSnapshot();
     setNodes((previous) => previous.filter((node) => node.id !== id));
     setEdges((previous) =>
       previous.filter(
@@ -282,12 +333,14 @@ export const App: React.FC = () => {
   };
 
   const handleChangeBankName = (id: string, bankName: string) => {
+    saveSnapshot();
     setNodes((previous) =>
       previous.map((node) => (node.id === id ? { ...node, bankName } : node)),
     );
   };
 
   const handleChangeNodeAmount = (id: string, amount: number) => {
+    saveSnapshot();
     setNodes((previous) =>
       previous.map((node) => (node.id === id ? { ...node, amount } : node)),
     );
@@ -316,6 +369,7 @@ export const App: React.FC = () => {
     sourceNodeId: string,
     direction: 'left' | 'right' | 'top' | 'bottom',
   ) => {
+    saveSnapshot();
     setNodes((prevNodes) => {
       const source = prevNodes.find((node) => node.id === sourceNodeId);
       if (!source) return prevNodes;
@@ -379,13 +433,12 @@ export const App: React.FC = () => {
       }
 
       const newIdPrefix = newType === 'income' ? 'income' : 'dest';
-      const countForType = prevNodes.filter((node) => node.type === newType).length + 1;
-      const newId = `${newIdPrefix}-${countForType}`;
+      const newId = `${newIdPrefix}-${crypto.randomUUID().slice(0, 8)}`;
 
       const newNode: FlowNodeData = {
         id: newId,
         type: newType,
-        itemName: newType === 'income' ? `새 수입 ${countForType}` : `새 목적지 ${countForType}`,
+        itemName: newType === 'income' ? '새 수입' : '새 목적지',
         bankName: '',
         amount: 0,
         color: newType === 'income' ? '#6366f1' : '#0ea5e9',
@@ -438,6 +491,7 @@ export const App: React.FC = () => {
     if (sourceId === targetId) {
       return;
     }
+    saveSnapshot();
 
     setEdges((previous) => {
       const exists = previous.some(
@@ -448,7 +502,7 @@ export const App: React.FC = () => {
       }
 
       const newEdge: FlowEdgeData = {
-        id: `edge-${sourceId}-${targetId}-${previous.length + 1}`,
+        id: `edge-${crypto.randomUUID().slice(0, 8)}`,
         fromNodeId: sourceId,
         toNodeId: targetId,
         amount: 0,
@@ -460,6 +514,7 @@ export const App: React.FC = () => {
   };
 
   const handleUpdateEdgeAmount = (edgeId: string, amount: number) => {
+    saveSnapshot();
     setEdges((previous) =>
       previous.map((edge) => {
         if (edge.id !== edgeId) {
@@ -498,6 +553,7 @@ export const App: React.FC = () => {
   };
 
   const handleDeleteEdge = (edgeId: string) => {
+    saveSnapshot();
     setEdges((previous) => previous.filter((edge) => edge.id !== edgeId));
     if (selectedEdgeId === edgeId) {
       setSelectedEdgeId(undefined);
@@ -524,12 +580,11 @@ export const App: React.FC = () => {
 
   const handleCreateNodeAt = (type: FlowNodeData['type'], x: number, y: number) => {
     setNodes((previous) => {
-      const countForType = previous.filter((node) => node.type === type).length + 1;
       const newIdPrefix = type === 'income' ? 'income' : 'dest';
       const newNode: FlowNodeData = {
-        id: `${newIdPrefix}-${countForType}`,
+        id: `${newIdPrefix}-${crypto.randomUUID().slice(0, 8)}`,
         type,
-        itemName: type === 'income' ? `새 수입 ${countForType}` : `새 목적지 ${countForType}`,
+        itemName: type === 'income' ? '새 수입' : '새 목적지',
         bankName: '',
         amount: 0,
         color: type === 'income' ? '#6366f1' : '#0ea5e9',
@@ -543,7 +598,30 @@ export const App: React.FC = () => {
   const handleClearSelection = () => {
     setSelectedNodeId(undefined);
     setSelectedEdgeId(undefined);
+    setEditingNodeId(undefined);
+    editSnapshotSavedRef.current = false;
     setContextMenu(null);
+  };
+
+  const handleStartEditNode = (id: string) => {
+    if (!editSnapshotSavedRef.current) {
+      saveSnapshot();
+      editSnapshotSavedRef.current = true;
+    }
+    setEditingNodeId(id);
+    setSelectedNodeId(id);
+    setSelectedEdgeId(undefined);
+  };
+
+  const handleCommitEditNode = () => {
+    setEditingNodeId(undefined);
+    editSnapshotSavedRef.current = false;
+  };
+
+  const handleCancelEditNode = () => {
+    handleUndo();
+    setEditingNodeId(undefined);
+    editSnapshotSavedRef.current = false;
   };
 
   return (
@@ -613,6 +691,9 @@ export const App: React.FC = () => {
         edges={edges}
         selectedNodeId={selectedNodeId}
         selectedEdgeId={selectedEdgeId}
+        editingNodeId={editingNodeId}
+        sidebarOpen={sidebarOpen}
+        onToggleSidebar={() => setSidebarOpen((prev) => !prev)}
         onSelectNode={handleSelectNode}
         onSelectEdge={handleSelectEdge}
         onOpenNodeMenu={handleOpenNodeMenu}
@@ -623,15 +704,18 @@ export const App: React.FC = () => {
         onRenameNode={handleRenameNode}
         onChangeBankName={handleChangeBankName}
         onChangeNodeAmount={handleChangeNodeAmount}
-          onDeleteNode={handleDeleteNode}
-          onAddNodeAround={handleAddNodeAround}
-          onMoveNode={handleMoveNode}
-          onClearSelection={handleClearSelection}
-          onCreateEdge={handleCreateEdge}
-          onUpdateEdgeAmount={handleUpdateEdgeAmount}
-          onReconnectEdge={handleReconnectEdge}
-          onDeleteEdge={handleDeleteEdge}
-        />
+        onDeleteNode={handleDeleteNode}
+        onStartEditNode={handleStartEditNode}
+        onCommitEditNode={handleCommitEditNode}
+        onCancelEditNode={handleCancelEditNode}
+        onAddNodeAround={handleAddNodeAround}
+        onMoveNode={handleMoveNode}
+        onClearSelection={handleClearSelection}
+        onCreateEdge={handleCreateEdge}
+        onUpdateEdgeAmount={handleUpdateEdgeAmount}
+        onReconnectEdge={handleReconnectEdge}
+        onDeleteEdge={handleDeleteEdge}
+      />
       </ReactFlowProvider>
     </div>
   );

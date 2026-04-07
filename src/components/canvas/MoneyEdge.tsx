@@ -61,6 +61,7 @@ export const MoneyEdge: React.FC<any> = ({
           style={{
             position: 'absolute',
             transform: `translate(-50%, -50%) translate(${labelX}px, ${labelY}px)`,
+            zIndex: 1,
           }}
           onClick={(event) => event.stopPropagation()}
         >
