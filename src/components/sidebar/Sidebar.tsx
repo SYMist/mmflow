@@ -1,42 +1,25 @@
 import React from 'react';
-import { FlowEdgeData, FlowNodeData } from '../../types/flow';
+import { useFlowStore } from '../../store/flowStore';
 import { IncomeList } from './IncomeList';
 import { DestinationList } from './DestinationList';
 import { RuleList } from './RuleList';
 
-interface SidebarProps {
-  nodes: FlowNodeData[];
-  edges: FlowEdgeData[];
-  onSelectNode: (id: string) => void;
-  onSelectEdge: (id: string) => void;
-  onAddIncome: () => void;
-  onAddDestination: () => void;
-}
+export const Sidebar: React.FC = () => {
+  const nodes = useFlowStore((s) => s.nodes);
+  const edges = useFlowStore((s) => s.edges);
+  const selectNode = useFlowStore((s) => s.selectNode);
+  const selectEdge = useFlowStore((s) => s.selectEdge);
+  const addIncome = useFlowStore((s) => s.addIncome);
+  const addDestination = useFlowStore((s) => s.addDestination);
 
-export const Sidebar: React.FC<SidebarProps> = ({
-  nodes,
-  edges,
-  onSelectNode,
-  onSelectEdge,
-  onAddIncome,
-  onAddDestination,
-}) => {
-  const incomes = nodes.filter((node) => node.type === 'income');
-  const destinations = nodes.filter((node) => node.type === 'destination');
+  const incomes = React.useMemo(() => nodes.filter((n) => n.type === 'income'), [nodes]);
+  const destinations = React.useMemo(() => nodes.filter((n) => n.type === 'destination'), [nodes]);
 
   return (
     <aside className="sidebar">
-      <IncomeList
-        incomes={incomes}
-        onSelect={onSelectNode}
-        onAdd={onAddIncome}
-      />
-      <DestinationList
-        destinations={destinations}
-        onSelect={onSelectNode}
-        onAdd={onAddDestination}
-      />
-      <RuleList edges={edges} nodes={nodes} onSelect={onSelectEdge} />
+      <IncomeList incomes={incomes} onSelect={selectNode} onAdd={addIncome} />
+      <DestinationList destinations={destinations} onSelect={selectNode} onAdd={addDestination} />
+      <RuleList edges={edges} nodes={nodes} onSelect={selectEdge} />
     </aside>
   );
 };

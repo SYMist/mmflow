@@ -88,11 +88,7 @@ export const MoneyEdge: React.FC<any> = ({
               <button
                 type="button"
                 className="edge-label-amount"
-                onClick={() => {
-                  if (selected) {
-                    setIsEditing(true);
-                  }
-                }}
+                onDoubleClick={() => setIsEditing(true)}
               >
                 {ratioText ?? '-'}
               </button>
