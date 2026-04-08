@@ -1,649 +1,82 @@
 import React from 'react';
-import type { Connection } from '@xyflow/react';
 import { ReactFlowProvider } from '@xyflow/react';
 import { Header } from './layout/Header';
 import { MainLayout } from './layout/MainLayout';
-import { FlowEdgeData, FlowNodeData } from '../types/flow';
-
-const STORAGE_KEY = 'money-flow-state-v1';
-
-const initialNodes: FlowNodeData[] = [
-  {
-    id: 'income-salary',
-    type: 'income',
-    itemName: '월급',
-    bankName: '회사',
-    amount: 3000000,
-    color: '#4f46e5',
-    x: 0,
-    y: 80,
-  },
-  {
-    id: 'dest-living',
-    type: 'destination',
-    itemName: '생활비',
-    bankName: '국민은행',
-    amount: 1500000,
-    color: '#10b981',
-    x: 350,
-    y: 40,
-  },
-  {
-    id: 'dest-invest',
-    type: 'destination',
-    itemName: '투자',
-    bankName: '토스증권',
-    amount: 1500000,
-    color: '#f97316',
-    x: 350,
-    y: 140,
-  },
-];
-
-const initialEdges: FlowEdgeData[] = [
-  {
-    id: 'edge-salary-living',
-    fromNodeId: 'income-salary',
-    toNodeId: 'dest-living',
-    amount: 1500000,
-    ratio: 0.5,
-  },
-  {
-    id: 'edge-salary-invest',
-    fromNodeId: 'income-salary',
-    toNodeId: 'dest-invest',
-    amount: 1500000,
-    ratio: 0.5,
-  },
-];
-
-type PersistedState = {
-  nodes: FlowNodeData[];
-  edges: FlowEdgeData[];
-  month: string;
-  scenarioName: string;
-  updatedAt: string;
-};
-
-type ContextMenuState =
-  | { type: 'node'; x: number; y: number; nodeId: string }
-  | { type: 'pane'; x: number; y: number; flowX: number; flowY: number }
-  | null;
-
-const loadPersistedState = (): PersistedState | null => {
-  if (typeof window === 'undefined') {
-    return null;
-  }
-
-  try {
-    const raw = window.localStorage.getItem(STORAGE_KEY);
-    if (!raw) {
-      return null;
-    }
-    const parsed = JSON.parse(raw) as PersistedState;
-    if (!parsed || !Array.isArray(parsed.nodes) || !Array.isArray(parsed.edges)) {
-      return null;
-    }
-    return parsed;
-  } catch {
-    return null;
-  }
-};
+import { EmptyState } from './canvas/EmptyState';
+import { useFlowStore, type ExportData } from '../store/flowStore';
 
 export const App: React.FC = () => {
-  const persisted = loadPersistedState();
-  const [month, setMonth] = React.useState<string>(
-    persisted?.month ?? '2025-01',
-  );
-  const [scenarioName, setScenarioName] = React.useState<string>(
-    persisted?.scenarioName ?? '기본 시나리오',
-  );
-  const [nodes, setNodes] = React.useState<FlowNodeData[]>(
-    persisted?.nodes ?? initialNodes,
-  );
-  const [edges, setEdges] = React.useState<FlowEdgeData[]>(
-    persisted?.edges ?? initialEdges,
-  );
-  const [lastSavedAt, setLastSavedAt] = React.useState<string | null>(
-    persisted?.updatedAt ?? null,
-  );
-  const [saveStatus, setSaveStatus] = React.useState<
-    'idle' | 'saving' | 'saved' | 'error'
-  >('idle');
-  const [sidebarOpen, setSidebarOpen] = React.useState(false);
-  const [contextMenu, setContextMenu] = React.useState<ContextMenuState>(null);
-  const [selectedNodeId, setSelectedNodeId] = React.useState<string | undefined>();
-  const [selectedEdgeId, setSelectedEdgeId] = React.useState<string | undefined>();
-  const [editingNodeId, setEditingNodeId] = React.useState<string | undefined>();
-  const editSnapshotSavedRef = React.useRef(false);
+  const store = useFlowStore();
 
-  type Snapshot = { nodes: FlowNodeData[]; edges: FlowEdgeData[] };
-  const MAX_HISTORY = 50;
-  const historyRef = React.useRef<Snapshot[]>([]);
-  const futureRef = React.useRef<Snapshot[]>([]);
-  const isUndoRedoRef = React.useRef(false);
-
-  const saveSnapshot = React.useCallback(() => {
-    historyRef.current = [
-      ...historyRef.current.slice(-(MAX_HISTORY - 1)),
-      { nodes, edges },
-    ];
-    futureRef.current = [];
-  }, [nodes, edges]);
-
-  const handleUndo = React.useCallback(() => {
-    const prev = historyRef.current.pop();
-    if (!prev) return;
-    futureRef.current.push({ nodes, edges });
-    isUndoRedoRef.current = true;
-    setNodes(prev.nodes);
-    setEdges(prev.edges);
-  }, [nodes, edges]);
-
-  const handleRedo = React.useCallback(() => {
-    const next = futureRef.current.pop();
-    if (!next) return;
-    historyRef.current.push({ nodes, edges });
-    isUndoRedoRef.current = true;
-    setNodes(next.nodes);
-    setEdges(next.edges);
-  }, [nodes, edges]);
-
+  // Keyboard shortcuts
   React.useEffect(() => {
     const handler = (event: KeyboardEvent) => {
       const mod = event.metaKey || event.ctrlKey;
-      if (!mod || event.key.toLowerCase() !== 'z') return;
-      event.preventDefault();
-      if (event.shiftKey) {
-        handleRedo();
-      } else {
-        handleUndo();
+      if (mod && event.key.toLowerCase() === 'z') {
+        event.preventDefault();
+        event.shiftKey ? store.redo() : store.undo();
+        return;
+      }
+
+      if (event.key === 'Delete' || event.key === 'Backspace') {
+        const target = event.target as HTMLElement;
+        if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA') return;
+        if (store.editingNodeId) return;
+
+        if (store.selectedNodeId) {
+          event.preventDefault();
+          if (window.confirm('이 노드와 연결된 규칙이 모두 삭제됩니다. 계속할까요?')) {
+            store.deleteNode(store.selectedNodeId);
+          }
+        } else if (store.selectedEdgeId) {
+          event.preventDefault();
+          store.deleteEdge(store.selectedEdgeId);
+        }
       }
     };
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
-  }, [handleUndo, handleRedo]);
+  }, [store.selectedNodeId, store.selectedEdgeId, store.editingNodeId, store]);
 
+  // Sidebar context menu on nodes
   React.useEffect(() => {
     const handler = (event: MouseEvent) => {
       const target = event.target as HTMLElement | null;
-      if (!target) {
-        return;
-      }
-
-      if (target.closest('.react-flow')) {
-        return;
-      }
-
-      const sidebar = target.closest('.sidebar');
-      if (!sidebar) {
-        return;
-      }
-
-      const nodeElement = target.closest<HTMLElement>('[data-node-id]');
-      const nodeId = nodeElement?.getAttribute('data-node-id');
-      if (!nodeId) {
-        return;
-      }
-
+      if (!target || target.closest('.react-flow') || !target.closest('.sidebar')) return;
+      const nodeEl = target.closest<HTMLElement>('[data-node-id]');
+      const nodeId = nodeEl?.getAttribute('data-node-id');
+      if (!nodeId) return;
       event.preventDefault();
       event.stopPropagation();
-
-      setSelectedNodeId(nodeId);
-      setSelectedEdgeId(undefined);
-      setContextMenu({ type: 'node', x: event.clientX, y: event.clientY, nodeId });
+      store.selectNode(nodeId);
+      store.openNodeMenu({ x: event.clientX, y: event.clientY, nodeId });
     };
-
     window.addEventListener('contextmenu', handler, { capture: true });
-    return () => {
-      window.removeEventListener('contextmenu', handler, { capture: true } as AddEventListenerOptions);
-    };
-  }, []);
+    return () => window.removeEventListener('contextmenu', handler, { capture: true } as EventListenerOptions);
+  }, [store]);
 
+  // Auto-save (debounced)
   React.useEffect(() => {
-    if (typeof window === 'undefined') {
-      return;
-    }
+    const handle = window.setTimeout(() => store.persist(), 300);
+    return () => window.clearTimeout(handle);
+  }, [store.nodes, store.edges, store.month, store.scenarioName]);
 
-    setSaveStatus('saving');
-
-    const handle = window.setTimeout(() => {
-      const payload: PersistedState = {
-        nodes,
-        edges,
-        month,
-        scenarioName,
-        updatedAt: new Date().toISOString(),
-      };
-
-      try {
-        window.localStorage.setItem(STORAGE_KEY, JSON.stringify(payload));
-        setLastSavedAt(payload.updatedAt);
-        setSaveStatus('saved');
-      } catch {
-        setSaveStatus('error');
-      }
-    }, 300);
-
-    return () => {
-      window.clearTimeout(handle);
-    };
-  }, [nodes, edges, month, scenarioName]);
-
-  const totalIn = React.useMemo(
-    () =>
-      nodes
-        .filter((node) => node.type === 'income')
-        .reduce((sum, node) => sum + node.amount, 0),
-    [nodes],
-  );
-
-  const totalOut = React.useMemo(
-    () => edges.reduce((sum, edge) => sum + edge.amount, 0),
-    [edges],
-  );
-
-  const getFallbackPosition = React.useCallback(
-    (node: FlowNodeData, index: number) => ({
-      x: node.x ?? (node.type === 'income' ? 0 : 350),
-      y: node.y ?? index * 80,
-    }),
-    [],
-  );
-
-  const handleAddIncome = () => {
-    saveSnapshot();
-    const incomes = nodes.filter((node) => node.type === 'income');
-    const incomeYs = incomes.map((node, index) => getFallbackPosition(node, index).y);
-    const nextY = incomeYs.length ? Math.max(...incomeYs) + 140 : 0;
-    const newIncome: FlowNodeData = {
-      id: `income-${crypto.randomUUID().slice(0, 8)}`,
-      type: 'income',
-      itemName: '새 수입',
-      bankName: '',
-      amount: 0,
-      color: '#6366f1',
-      x: 0,
-      y: nextY,
-    };
-    setNodes((previous) => [...previous, newIncome]);
-  };
-
-  const handleAddDestination = () => {
-    saveSnapshot();
-    const destinations = nodes.filter((node) => node.type === 'destination');
-    const destinationYs = destinations.map((node, index) => getFallbackPosition(node, index).y);
-    const nextY = destinationYs.length ? Math.max(...destinationYs) + 140 : 0;
-    const newDestination: FlowNodeData = {
-      id: `dest-${crypto.randomUUID().slice(0, 8)}`,
-      type: 'destination',
-      itemName: '새 목적지',
-      bankName: '',
-      amount: 0,
-      color: '#0ea5e9',
-      x: 350,
-      y: nextY,
-    };
-    setNodes((previous) => [...previous, newDestination]);
-  };
-
-  const handleSelectNode = (id: string) => {
-    setSelectedNodeId(id);
-    setSelectedEdgeId(undefined);
-    setContextMenu(null);
-  };
-
-  const handleSelectEdge = (id: string) => {
-    setSelectedEdgeId(id);
-    setSelectedNodeId(undefined);
-    setContextMenu(null);
-    setEdges((previous) => {
-      const index = previous.findIndex((edge) => edge.id === id);
-      if (index <= -1 || index === previous.length - 1) {
-        return previous;
-      }
-      const next = [...previous];
-      const [selectedEdge] = next.splice(index, 1);
-      next.push(selectedEdge);
-      return next;
-    });
-  };
-
-  const handleRenameNode = (id: string, itemName: string) => {
-    saveSnapshot();
-    setNodes((previous) =>
-      previous.map((node) => (node.id === id ? { ...node, itemName } : node)),
-    );
-  };
-
-  const handleDeleteNode = (id: string) => {
-    saveSnapshot();
-    setNodes((previous) => previous.filter((node) => node.id !== id));
-    setEdges((previous) =>
-      previous.filter(
-        (edge) => edge.fromNodeId !== id && edge.toNodeId !== id,
-      ),
-    );
-
-    if (selectedNodeId === id) {
-      setSelectedNodeId(undefined);
-    }
-    setSelectedEdgeId(undefined);
-    setContextMenu(null);
-  };
-
-  const handleChangeBankName = (id: string, bankName: string) => {
-    saveSnapshot();
-    setNodes((previous) =>
-      previous.map((node) => (node.id === id ? { ...node, bankName } : node)),
-    );
-  };
-
-  const handleChangeNodeAmount = (id: string, amount: number) => {
-    saveSnapshot();
-    setNodes((previous) =>
-      previous.map((node) => (node.id === id ? { ...node, amount } : node)),
-    );
-
-    setEdges((previous) =>
-      previous.map((edge) => {
-        if (edge.fromNodeId !== id) {
-          return edge;
-        }
-        const ratio = amount ? edge.amount / amount : undefined;
-        return {
-          ...edge,
-          ratio,
-        };
-      }),
-    );
-  };
-
-  const handleMoveNode = (id: string, x: number, y: number) => {
-    setNodes((previous) =>
-      previous.map((node) => (node.id === id ? { ...node, x, y } : node)),
-    );
-  };
-
-  const handleAddNodeAround = (
-    sourceNodeId: string,
-    direction: 'left' | 'right' | 'top' | 'bottom',
-  ) => {
-    saveSnapshot();
-    setNodes((prevNodes) => {
-      const source = prevNodes.find((node) => node.id === sourceNodeId);
-      if (!source) return prevNodes;
-
-      const isSourceIncome = source.type === 'income';
-      const newType: FlowNodeData['type'] = isSourceIncome ? 'destination' : 'income';
-      const sourceIndex = prevNodes.findIndex((node) => node.id === sourceNodeId);
-      const sourceFallback = getFallbackPosition(source, Math.max(sourceIndex, 0));
-      const baseX = sourceFallback.x;
-      const baseY = sourceFallback.y;
-      const offset = 180;
-
-      let x = baseX;
-      let y = baseY;
-      if (direction === 'left') x = baseX - offset;
-      if (direction === 'right') x = baseX + offset;
-      if (direction === 'top') y = baseY - offset;
-      if (direction === 'bottom') y = baseY + offset;
-
-      const occupiedPositions = prevNodes.map((node, index) => getFallbackPosition(node, index));
-
-      const isOccupied = (candidateX: number, candidateY: number) =>
-        occupiedPositions.some(
-          (pos) =>
-            Math.abs(pos.x - candidateX) < 160 && Math.abs(pos.y - candidateY) < 120,
-        );
-
-      const directionVector =
-        direction === 'left'
-          ? { dx: -1, dy: 0 }
-          : direction === 'right'
-            ? { dx: 1, dy: 0 }
-            : direction === 'top'
-              ? { dx: 0, dy: -1 }
-              : { dx: 0, dy: 1 };
-      const step = 40;
-      const maxSteps = 10;
-      const lateralOffsets = [0, 1, -1, 2, -2, 3, -3];
-      let found = !isOccupied(x, y);
-      if (!found) {
-        for (let i = 1; i <= maxSteps && !found; i += 1) {
-          const baseCandidateX = x + directionVector.dx * step * i;
-          const baseCandidateY = y + directionVector.dy * step * i;
-          for (const lateral of lateralOffsets) {
-            const candidateX =
-              directionVector.dx === 0
-                ? baseCandidateX + lateral * step
-                : baseCandidateX;
-            const candidateY =
-              directionVector.dy === 0
-                ? baseCandidateY + lateral * step
-                : baseCandidateY;
-            if (!isOccupied(candidateX, candidateY)) {
-              x = candidateX;
-              y = candidateY;
-              found = true;
-              break;
-            }
-          }
-        }
-      }
-
-      const newIdPrefix = newType === 'income' ? 'income' : 'dest';
-      const newId = `${newIdPrefix}-${crypto.randomUUID().slice(0, 8)}`;
-
-      const newNode: FlowNodeData = {
-        id: newId,
-        type: newType,
-        itemName: newType === 'income' ? '새 수입' : '새 목적지',
-        bankName: '',
-        amount: 0,
-        color: newType === 'income' ? '#6366f1' : '#0ea5e9',
-        x,
-        y,
-      };
-
-      const oppositeDirection =
-        direction === 'left'
-          ? 'right'
-          : direction === 'right'
-            ? 'left'
-            : direction === 'top'
-              ? 'bottom'
-              : 'top';
-
-      // 새 노드 추가와 동시에 연결 엣지 생성
-      setEdges((prevEdges) => {
-        const newEdge: FlowEdgeData =
-          isSourceIncome
-            ? {
-                id: `edge-${source.id}-${newId}`,
-                fromNodeId: source.id,
-                toNodeId: newId,
-                amount: 0,
-                sourceHandleId: `s-${direction}`,
-                targetHandleId: `t-${oppositeDirection}`,
-              }
-            : {
-                id: `edge-${newId}-${source.id}`,
-                fromNodeId: newId,
-                toNodeId: source.id,
-                amount: 0,
-                sourceHandleId: `s-${oppositeDirection}`,
-                targetHandleId: `t-${direction}`,
-              };
-        return [...prevEdges, newEdge];
-      });
-
-      return [...prevNodes, newNode];
-    });
-  };
-
-  const handleCreateEdge = (
-    sourceId: string,
-    targetId: string,
-    sourceHandleId?: string | null,
-    targetHandleId?: string | null,
-  ) => {
-    if (sourceId === targetId) {
-      return;
-    }
-    saveSnapshot();
-
-    setEdges((previous) => {
-      const exists = previous.some(
-        (edge) => edge.fromNodeId === sourceId && edge.toNodeId === targetId,
-      );
-      if (exists) {
-        return previous;
-      }
-
-      const newEdge: FlowEdgeData = {
-        id: `edge-${crypto.randomUUID().slice(0, 8)}`,
-        fromNodeId: sourceId,
-        toNodeId: targetId,
-        amount: 0,
-        sourceHandleId: sourceHandleId ?? undefined,
-        targetHandleId: targetHandleId ?? undefined,
-      };
-      return [...previous, newEdge];
-    });
-  };
-
-  const handleUpdateEdgeAmount = (edgeId: string, amount: number) => {
-    saveSnapshot();
-    setEdges((previous) =>
-      previous.map((edge) => {
-        if (edge.id !== edgeId) {
-          return edge;
-        }
-        const sourceNode = nodes.find((node) => node.id === edge.fromNodeId);
-        const ratio = sourceNode?.amount ? amount / sourceNode.amount : undefined;
-        return { ...edge, amount, ratio };
-      }),
-    );
-  };
-
-  const handleReconnectEdge = (edgeId: string, connection: Connection) => {
-    setEdges((previous) =>
-      previous.map((edge) => {
-        if (edge.id !== edgeId) {
-          return edge;
-        }
-
-        const nextSourceId = connection.source ?? edge.fromNodeId;
-        const nextTargetId = connection.target ?? edge.toNodeId;
-        const nextEdge: FlowEdgeData = {
-          ...edge,
-          fromNodeId: nextSourceId,
-          toNodeId: nextTargetId,
-          sourceHandleId: connection.sourceHandle ?? edge.sourceHandleId,
-          targetHandleId: connection.targetHandle ?? edge.targetHandleId,
-        };
-
-        const sourceNode = nodes.find((node) => node.id === nextSourceId);
-        nextEdge.ratio = sourceNode?.amount ? nextEdge.amount / sourceNode.amount : undefined;
-
-        return nextEdge;
-      }),
-    );
-  };
-
-  const handleDeleteEdge = (edgeId: string) => {
-    saveSnapshot();
-    setEdges((previous) => previous.filter((edge) => edge.id !== edgeId));
-    if (selectedEdgeId === edgeId) {
-      setSelectedEdgeId(undefined);
-    }
-    setContextMenu(null);
-  };
-
-  const handleOpenNodeMenu = (payload: { x: number; y: number; nodeId: string }) => {
-    setContextMenu({ type: 'node', ...payload });
-  };
-
-  const handleOpenPaneMenu = (payload: {
-    x: number;
-    y: number;
-    flowX: number;
-    flowY: number;
-  }) => {
-    setContextMenu({ type: 'pane', ...payload });
-  };
-
-  const handleCloseMenu = () => {
-    setContextMenu(null);
-  };
-
-  const handleCreateNodeAt = (type: FlowNodeData['type'], x: number, y: number) => {
-    setNodes((previous) => {
-      const newIdPrefix = type === 'income' ? 'income' : 'dest';
-      const newNode: FlowNodeData = {
-        id: `${newIdPrefix}-${crypto.randomUUID().slice(0, 8)}`,
-        type,
-        itemName: type === 'income' ? '새 수입' : '새 목적지',
-        bankName: '',
-        amount: 0,
-        color: type === 'income' ? '#6366f1' : '#0ea5e9',
-        x,
-        y,
-      };
-      return [...previous, newNode];
-    });
-    setContextMenu(null);
-  };
-  const handleClearSelection = () => {
-    setSelectedNodeId(undefined);
-    setSelectedEdgeId(undefined);
-    setEditingNodeId(undefined);
-    editSnapshotSavedRef.current = false;
-    setContextMenu(null);
-  };
-
-  const handleStartEditNode = (id: string) => {
-    if (!editSnapshotSavedRef.current) {
-      saveSnapshot();
-      editSnapshotSavedRef.current = true;
-    }
-    setEditingNodeId(id);
-    setSelectedNodeId(id);
-    setSelectedEdgeId(undefined);
-  };
-
-  const handleCommitEditNode = () => {
-    setEditingNodeId(undefined);
-    editSnapshotSavedRef.current = false;
-  };
-
-  const handleCancelEditNode = () => {
-    handleUndo();
-    setEditingNodeId(undefined);
-    editSnapshotSavedRef.current = false;
-  };
+  const totalIn = store.totalIn();
+  const totalOut = store.totalOut();
+  const hasNodes = store.nodes.length > 0;
 
   return (
     <div className="app-root">
-      {contextMenu ? (
-        <div
-          className="context-menu-overlay"
-          onClick={handleCloseMenu}
-          onContextMenu={handleCloseMenu}
-        >
+      {store.contextMenu ? (
+        <div className="context-menu-overlay" onClick={store.closeMenu} onContextMenu={store.closeMenu}>
           <div
             className="context-menu"
-            style={{ left: contextMenu.x, top: contextMenu.y }}
-            onClick={(event) => event.stopPropagation()}
-            onContextMenu={(event) => event.stopPropagation()}
+            style={{ left: store.contextMenu.x, top: store.contextMenu.y }}
+            onClick={(e) => e.stopPropagation()}
+            onContextMenu={(e) => e.stopPropagation()}
           >
-            {contextMenu.type === 'node' ? (
-              <button
-                type="button"
-                className="context-menu-item"
-                onClick={() => handleDeleteNode(contextMenu.nodeId)}
-              >
+            {store.contextMenu.type === 'node' ? (
+              <button type="button" className="context-menu-item" onClick={() => store.deleteNode(store.contextMenu!.type === 'node' ? store.contextMenu!.nodeId : '')}>
                 삭제
               </button>
             ) : (
@@ -651,24 +84,8 @@ export const App: React.FC = () => {
                 <span>노드 생성</span>
                 <span className="context-menu-caret">▶</span>
                 <div className="context-submenu">
-                  <button
-                    type="button"
-                    className="context-menu-item"
-                    onClick={() =>
-                      handleCreateNodeAt('income', contextMenu.flowX, contextMenu.flowY)
-                    }
-                  >
-                    수입
-                  </button>
-                  <button
-                    type="button"
-                    className="context-menu-item"
-                    onClick={() =>
-                      handleCreateNodeAt('destination', contextMenu.flowX, contextMenu.flowY)
-                    }
-                  >
-                    목적지
-                  </button>
+                  <button type="button" className="context-menu-item" onClick={() => store.contextMenu?.type === 'pane' && store.createNodeAt('income', store.contextMenu.flowX, store.contextMenu.flowY)}>수입</button>
+                  <button type="button" className="context-menu-item" onClick={() => store.contextMenu?.type === 'pane' && store.createNodeAt('destination', store.contextMenu.flowX, store.contextMenu.flowY)}>목적지</button>
                 </div>
               </div>
             )}
@@ -676,46 +93,47 @@ export const App: React.FC = () => {
         </div>
       ) : null}
       <Header
-        month={month}
-        scenarioName={scenarioName}
-        onChangeMonth={setMonth}
-        onChangeScenario={setScenarioName}
+        month={store.month}
+        scenarioName={store.scenarioName}
+        onChangeMonth={store.setMonth}
+        onChangeScenario={store.setScenarioName}
         totalIn={totalIn}
         totalOut={totalOut}
-        lastSavedAt={lastSavedAt}
-        saveStatus={saveStatus}
+        lastSavedAt={store.lastSavedAt}
+        saveStatus={store.saveStatus}
+        onExport={() => {
+          const data = store.exportAll();
+          const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+          const url = URL.createObjectURL(blob);
+          const a = document.createElement('a');
+          a.href = url;
+          a.download = `money-flow-backup-${new Date().toISOString().slice(0, 10)}.json`;
+          a.click();
+          URL.revokeObjectURL(url);
+        }}
+        onImport={(file: File) => {
+          const reader = new FileReader();
+          reader.onload = () => {
+            try {
+              const data = JSON.parse(reader.result as string) as ExportData;
+              if (store.importAll(data)) {
+                window.location.reload();
+              } else {
+                window.alert('올바르지 않은 백업 파일입니다.');
+              }
+            } catch {
+              window.alert('파일을 읽을 수 없습니다.');
+            }
+          };
+          reader.readAsText(file);
+        }}
       />
       <ReactFlowProvider>
-      <MainLayout
-        nodes={nodes}
-        edges={edges}
-        selectedNodeId={selectedNodeId}
-        selectedEdgeId={selectedEdgeId}
-        editingNodeId={editingNodeId}
-        sidebarOpen={sidebarOpen}
-        onToggleSidebar={() => setSidebarOpen((prev) => !prev)}
-        onSelectNode={handleSelectNode}
-        onSelectEdge={handleSelectEdge}
-        onOpenNodeMenu={handleOpenNodeMenu}
-        onOpenPaneMenu={handleOpenPaneMenu}
-        isContextMenuOpen={contextMenu !== null}
-        onAddIncome={handleAddIncome}
-        onAddDestination={handleAddDestination}
-        onRenameNode={handleRenameNode}
-        onChangeBankName={handleChangeBankName}
-        onChangeNodeAmount={handleChangeNodeAmount}
-        onDeleteNode={handleDeleteNode}
-        onStartEditNode={handleStartEditNode}
-        onCommitEditNode={handleCommitEditNode}
-        onCancelEditNode={handleCancelEditNode}
-        onAddNodeAround={handleAddNodeAround}
-        onMoveNode={handleMoveNode}
-        onClearSelection={handleClearSelection}
-        onCreateEdge={handleCreateEdge}
-        onUpdateEdgeAmount={handleUpdateEdgeAmount}
-        onReconnectEdge={handleReconnectEdge}
-        onDeleteEdge={handleDeleteEdge}
-      />
+        {hasNodes ? (
+          <MainLayout />
+        ) : (
+          <EmptyState onAddIncome={store.addIncome} onAddDestination={store.addDestination} />
+        )}
       </ReactFlowProvider>
     </div>
   );
