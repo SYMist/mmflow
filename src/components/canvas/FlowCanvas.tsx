@@ -9,20 +9,23 @@ import {
   type Edge as RFEdge,
   type Connection,
 } from '@xyflow/react';
-import { useFlowStore } from '../../store/flowStore';
+import { useFlowStoreV3 } from '../../store/flowStoreV3';
 import { FlowNode } from './FlowNode';
 import { MoneyEdge } from './MoneyEdge';
+import { GroupOverlay } from './GroupOverlay';
+import { AreaOverlay } from './AreaOverlay';
 
 export const FlowCanvas: React.FC = () => {
   const {
     nodes, edges,
     selectedNodeId, selectedEdgeId, editingNodeId,
     selectNode, selectEdge, openNodeMenu, openPaneMenu,
-    contextMenu, addNodeAround, moveNode, clearSelection,
-    createEdge, updateEdgeAmount, reconnectEdge, deleteEdge,
-    renameNode, changeBankName, changeNodeAmount, changeNodeColor, deleteNode,
+    contextMenu, moveNode, clearSelection,
+    createEdge, reconnectEdge, deleteEdge,
+    updateNode, deleteNode, changeNodeColor,
     startEditNode, commitEditNode, cancelEditNode,
-  } = useFlowStore();
+    warningNodeIds, tryGroupOnDrop,
+  } = useFlowStoreV3();
 
   const isContextMenuOpen = contextMenu !== null;
   const { screenToFlowPosition } = useReactFlow();
@@ -30,7 +33,7 @@ export const FlowCanvas: React.FC = () => {
   const suppressNextPaneClickRef = useRef(false);
   const containerRef = useRef<HTMLDivElement | null>(null);
 
-  // Context menu handler
+  // Custom context menu handler
   useEffect(() => {
     const handler = (event: MouseEvent) => {
       const container = containerRef.current;
@@ -58,7 +61,9 @@ export const FlowCanvas: React.FC = () => {
     return () => window.removeEventListener('contextmenu', handler, { capture: true } as EventListenerOptions);
   }, [selectNode, openNodeMenu, openPaneMenu, screenToFlowPosition]);
 
-  // Sync nodes to RF nodes — only update changed nodes (P2 optimization)
+  const warnings = useMemo(() => warningNodeIds(), [warningNodeIds, nodes, edges]);
+
+  // Sync nodes
   useEffect(() => {
     setRfNodes((prev) => {
       const prevMap = new Map(prev.map((n) => [n.id, n]));
@@ -66,16 +71,19 @@ export const FlowCanvas: React.FC = () => {
         const existing = prevMap.get(node.id);
         const isEditing = node.id === editingNodeId;
         const isSelected = node.id === selectedNodeId;
+        const hasWarning = warnings.has(node.id);
 
-        // Reuse existing RF node if data hasn't changed
         if (
           existing &&
-          existing.data.itemName === node.itemName &&
-          existing.data.bankName === node.bankName &&
+          existing.data.name === node.name &&
+          existing.data.account === node.account &&
           existing.data.amount === node.amount &&
           existing.data.color === node.color &&
           existing.data.isEditing === isEditing &&
-          existing.selected === isSelected
+          existing.data.hasWarning === hasWarning &&
+          existing.selected === isSelected &&
+          existing.position.x === (node.x ?? 0) &&
+          existing.position.y === (node.y ?? 0)
         ) {
           return existing;
         }
@@ -84,60 +92,44 @@ export const FlowCanvas: React.FC = () => {
           id: node.id,
           type: 'moneyNode',
           data: {
-            itemName: node.itemName,
-            bankName: node.bankName,
-            amount: node.amount,
             type: node.type,
+            name: node.name,
+            account: node.account,
+            amount: node.amount,
             color: node.color,
             isEditing,
-            onAddNeighbor: (dir: 'left' | 'right' | 'top' | 'bottom') => addNodeAround(node.id, dir),
-            onRename: (name: string) => renameNode(node.id, name),
-            onChangeBankName: (bn: string) => changeBankName(node.id, bn),
-            onChangeAmount: (amt: number) => changeNodeAmount(node.id, amt),
+            hasWarning,
+            onRename: (v: string) => updateNode(node.id, { name: v }),
+            onChangeAccount: (v: string) => updateNode(node.id, { account: v }),
+            onChangeAmount: (v: number) => updateNode(node.id, { amount: v }),
             onChangeColor: (c: string) => changeNodeColor(node.id, c),
             onDelete: () => deleteNode(node.id),
             onCommitEdit: commitEditNode,
             onCancelEdit: cancelEditNode,
           },
-          position: existing?.position ?? {
-            x: node.x ?? (node.type === 'income' ? 0 : 350),
+          position: {
+            x: node.x ?? (node.type === 'source' ? 0 : node.type === 'destination' ? 350 : 200),
             y: node.y ?? index * 80,
           },
           selected: isSelected,
-          draggable: !isEditing,
+          draggable: !isEditing && node.type !== 'sub',
         } as RFNode;
       });
     });
-  }, [nodes, selectedNodeId, editingNodeId, addNodeAround, renameNode, changeBankName, changeNodeAmount, changeNodeColor, deleteNode, commitEditNode, cancelEditNode, setRfNodes]);
-
-  const nodeMap = useMemo(() => {
-    const m = new Map(nodes.map((n) => [n.id, n]));
-    return m;
-  }, [nodes]);
+  }, [nodes, selectedNodeId, editingNodeId, warnings, updateNode, changeNodeColor, deleteNode, commitEditNode, cancelEditNode, setRfNodes]);
 
   const rfEdges = useMemo<RFEdge[]>(() =>
-    edges.map((edge) => {
-      const fromNode = nodeMap.get(edge.fromNodeId);
-      const toNode = nodeMap.get(edge.toNodeId);
-      const ratio = fromNode?.amount
-        ? (edge.amount || toNode?.amount || 0) / fromNode.amount
-        : undefined;
-
-      return {
-        id: edge.id,
-        source: edge.fromNodeId,
-        target: edge.toNodeId,
-        sourceHandle: edge.sourceHandleId,
-        targetHandle: edge.targetHandleId,
-        type: 'moneyEdge',
-        data: { amount: edge.amount, ratio, onChangeAmount: updateEdgeAmount, onDeleteEdge: deleteEdge },
-        animated: false,
-        selected: edge.id === selectedEdgeId,
-        zIndex: edge.id === selectedEdgeId ? 10 : 1,
-        style: { strokeWidth: edge.id === selectedEdgeId ? 3 : 2 },
-      };
-    }),
-  [edges, selectedEdgeId, nodeMap, updateEdgeAmount, deleteEdge]);
+    edges.map((edge) => ({
+      id: edge.id,
+      source: edge.fromNodeId,
+      target: edge.toNodeId,
+      sourceHandle: edge.sourceHandleId,
+      targetHandle: edge.targetHandleId,
+      type: 'moneyEdge',
+      selected: edge.id === selectedEdgeId,
+      zIndex: edge.id === selectedEdgeId ? 10 : 1,
+    })),
+  [edges, selectedEdgeId]);
 
   return (
     <div className="flow-canvas" ref={containerRef}>
@@ -154,7 +146,10 @@ export const FlowCanvas: React.FC = () => {
         onNodeClick={(_e, node) => selectNode(node.id)}
         onNodeDoubleClick={(_e, node) => startEditNode(node.id)}
         onEdgeClick={(_e, edge) => selectEdge(edge.id)}
-        onNodeDragStop={(_e, node) => moveNode(node.id, node.position.x ?? 0, node.position.y ?? 0)}
+        onNodeDragStop={(_e, node) => {
+          moveNode(node.id, node.position.x ?? 0, node.position.y ?? 0);
+          tryGroupOnDrop(node.id);
+        }}
         onPaneClick={(event) => {
           if (suppressNextPaneClickRef.current || isContextMenuOpen || event.button === 2) return;
           clearSelection();
@@ -170,6 +165,8 @@ export const FlowCanvas: React.FC = () => {
       >
         <Background gap={20} size={1} color="#e5e7eb" />
         <Controls showInteractive={false} />
+        <AreaOverlay />
+        <GroupOverlay />
       </ReactFlow>
     </div>
   );
