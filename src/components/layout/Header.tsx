@@ -125,13 +125,16 @@ export const Header: React.FC = () => {
   const copyFromPreviousMonth = useFlowStoreV3((s) => s.copyFromPreviousMonth);
   const goToList = useFlowStoreV3((s) => s.goToList);
   const totalSourceAndSubAmount = useFlowStoreV3((s) => s.totalSourceAndSubAmount);
+  const totalsByArea = useFlowStoreV3((s) => s.totalsByArea);
   const saveStatus = useFlowStoreV3((s) => s.saveStatus);
   const lastSavedAt = useFlowStoreV3((s) => s.lastSavedAt);
   const nodes = useFlowStoreV3((s) => s.nodes);
 
   if (!canvasMeta) return null;
 
+  const isMulti = canvasMeta.members.length >= 2;
   const total = totalSourceAndSubAmount();
+  const areaTotals = totalsByArea();
   const destinationTotal = nodes
     .filter((n) => n.type === 'destination')
     .reduce((s, n) => s + (n.amount || 0), 0);
@@ -160,14 +163,35 @@ export const Header: React.FC = () => {
         />
       </div>
       <div className="app-header-right">
-        <div className="header-stat">
-          <span className="header-stat-label">출발+서브</span>
-          <span className="header-stat-value header-stat-in">{total.toLocaleString('ko-KR')}원</span>
-        </div>
-        <div className="header-stat">
-          <span className="header-stat-label">도착</span>
-          <span className="header-stat-value">{destinationTotal.toLocaleString('ko-KR')}원</span>
-        </div>
+        {isMulti ? (
+          <>
+            <div className="header-stat">
+              <span className="header-stat-label">공유</span>
+              <span className="header-stat-value header-stat-in">
+                {(areaTotals['__shared__'] ?? 0).toLocaleString('ko-KR')}원
+              </span>
+            </div>
+            {canvasMeta.members.slice(0, 2).map((m) => (
+              <div key={m.id} className="header-stat">
+                <span className="header-stat-label">{m.name}</span>
+                <span className="header-stat-value">
+                  {(areaTotals[m.id] ?? 0).toLocaleString('ko-KR')}원
+                </span>
+              </div>
+            ))}
+          </>
+        ) : (
+          <>
+            <div className="header-stat">
+              <span className="header-stat-label">출발+서브</span>
+              <span className="header-stat-value header-stat-in">{total.toLocaleString('ko-KR')}원</span>
+            </div>
+            <div className="header-stat">
+              <span className="header-stat-label">도착</span>
+              <span className="header-stat-value">{destinationTotal.toLocaleString('ko-KR')}원</span>
+            </div>
+          </>
+        )}
         <span className="header-save-status">{savedLabel}</span>
       </div>
     </header>

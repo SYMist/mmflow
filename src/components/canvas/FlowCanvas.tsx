@@ -12,6 +12,8 @@ import {
 import { useFlowStoreV3 } from '../../store/flowStoreV3';
 import { FlowNode } from './FlowNode';
 import { MoneyEdge } from './MoneyEdge';
+import { GroupOverlay } from './GroupOverlay';
+import { AreaOverlay } from './AreaOverlay';
 
 export const FlowCanvas: React.FC = () => {
   const {
@@ -22,7 +24,7 @@ export const FlowCanvas: React.FC = () => {
     createEdge, reconnectEdge, deleteEdge,
     updateNode, deleteNode, changeNodeColor,
     startEditNode, commitEditNode, cancelEditNode,
-    warningNodeIds,
+    warningNodeIds, tryGroupOnDrop,
   } = useFlowStoreV3();
 
   const isContextMenuOpen = contextMenu !== null;
@@ -144,7 +146,10 @@ export const FlowCanvas: React.FC = () => {
         onNodeClick={(_e, node) => selectNode(node.id)}
         onNodeDoubleClick={(_e, node) => startEditNode(node.id)}
         onEdgeClick={(_e, edge) => selectEdge(edge.id)}
-        onNodeDragStop={(_e, node) => moveNode(node.id, node.position.x ?? 0, node.position.y ?? 0)}
+        onNodeDragStop={(_e, node) => {
+          moveNode(node.id, node.position.x ?? 0, node.position.y ?? 0);
+          tryGroupOnDrop(node.id);
+        }}
         onPaneClick={(event) => {
           if (suppressNextPaneClickRef.current || isContextMenuOpen || event.button === 2) return;
           clearSelection();
@@ -160,6 +165,8 @@ export const FlowCanvas: React.FC = () => {
       >
         <Background gap={20} size={1} color="#e5e7eb" />
         <Controls showInteractive={false} />
+        <AreaOverlay />
+        <GroupOverlay />
       </ReactFlow>
     </div>
   );

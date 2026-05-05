@@ -53,12 +53,19 @@ export const CanvasPage: React.FC = () => {
     ? nodes.find((n) => n.id === contextMenu.nodeId)
     : null;
 
+  const showHint = nodes.length === 0;
+
   return (
     <ReactFlowProvider>
       <Header />
 
       <main className="main-layout-v3">
         <FlowCanvas />
+        {showHint && (
+          <div className="canvas-empty-hint">
+            <p>캔버스 빈 영역에서 우클릭하여 출발 노드 또는 도착 노드를 만들어보세요</p>
+          </div>
+        )}
       </main>
 
       {contextMenu && (

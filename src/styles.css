@@ -1584,6 +1584,22 @@ body {
 .flow-node:hover .flow-node-handle { opacity: 1; }
 .flow-node-selected .flow-node-handle { opacity: 1; }
 
+.canvas-empty-hint {
+  position: absolute;
+  bottom: 24px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: rgba(255, 255, 255, 0.95);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  padding: 10px 16px;
+  font-size: 12px;
+  color: var(--color-text-secondary);
+  box-shadow: var(--shadow-sm);
+  pointer-events: none;
+  z-index: 10;
+}
+
 /* Dark mode for v3 components */
 @media (prefers-color-scheme: dark) {
   .canvas-card { background: var(--color-surface); }
@@ -1593,4 +1609,8 @@ body {
     color: #fbbf24;
   }
   .canvas-create-summary { background: var(--color-background); }
+  .canvas-empty-hint {
+    background: rgba(30, 30, 46, 0.95);
+    border-color: var(--color-border);
+  }
 }
