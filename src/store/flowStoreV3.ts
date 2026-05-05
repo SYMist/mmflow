@@ -106,22 +106,28 @@ export const getMemberCountConstraint = (memberType: MemberType): number | null 
 };
 
 /* ── Area (zone) coordinates ── */
-export const AREA_SHARED_X_MIN = -180;
-export const AREA_SHARED_X_MAX = 180;
+export const DEFAULT_AREA_SHARED_X_MIN = -180;
+export const DEFAULT_AREA_SHARED_X_MAX = 180;
+
+export const getAreaBounds = (meta: CanvasMeta | null) => ({
+  sharedXMin: meta?.areaBounds?.sharedXMin ?? DEFAULT_AREA_SHARED_X_MIN,
+  sharedXMax: meta?.areaBounds?.sharedXMax ?? DEFAULT_AREA_SHARED_X_MAX,
+});
 
 /** Determine area for an x coordinate (multi-member layouts only) */
 export const getAreaForPosition = (
   x: number,
   members: CanvasMember[],
+  meta?: CanvasMeta | null,
 ): { memberId?: string; isShared: boolean } => {
   if (members.length < 2) {
     return { memberId: undefined, isShared: false };
   }
-  if (x >= AREA_SHARED_X_MIN && x <= AREA_SHARED_X_MAX) {
+  const { sharedXMin, sharedXMax } = getAreaBounds(meta ?? null);
+  if (x >= sharedXMin && x <= sharedXMax) {
     return { memberId: undefined, isShared: true };
   }
-  // Left: members[0], Right: members[1] (3+ members handled in future)
-  if (x < AREA_SHARED_X_MIN) return { memberId: members[0].id, isShared: false };
+  if (x < sharedXMin) return { memberId: members[0].id, isShared: false };
   return { memberId: members[1]?.id ?? members[0].id, isShared: false };
 };
 
@@ -141,6 +147,12 @@ type GroupProposal = {
   candidateNodeId: string; // newly cloned node
   existingNodeIds: string[]; // nodes with same match key
 };
+
+export type Selection =
+  | { type: 'node'; id: string }
+  | { type: 'edge'; id: string }
+  | { type: 'group'; id: string }
+  | null;
 
 /* ── Store ── */
 interface FlowStore {
@@ -173,14 +185,14 @@ interface FlowStore {
   copyFromPreviousMonth: (target: string, source: string) => void;
   persist: () => void;
 
-  // Selection / UI
-  selectedNodeId?: string;
-  selectedEdgeId?: string;
+  // Selection / UI (single source of truth)
+  selection: Selection;
   editingNodeId?: string;
   contextMenu: ContextMenuState;
   groupProposal: GroupProposal | null;
   selectNode: (id: string) => void;
   selectEdge: (id: string) => void;
+  selectGroup: (id: string) => void;
   clearSelection: () => void;
   openNodeMenu: (p: { x: number; y: number; nodeId: string }) => void;
   openPaneMenu: (p: { x: number; y: number; flowX: number; flowY: number }) => void;
@@ -218,6 +230,13 @@ interface FlowStore {
   tryGroupOnDrop: (droppedId: string) => void;
   /** Compute total amount of a group */
   groupTotal: (groupId: string) => number;
+  /** Set custom group bounds (drag-to-resize) */
+  setGroupBounds: (groupId: string, bounds: { minX: number; minY: number; maxX: number; maxY: number }) => void;
+  /** Move group: shifts all members + their sub nodes + bounds (if explicit) by dx/dy */
+  moveGroup: (groupId: string, dx: number, dy: number) => void;
+
+  // Area actions (multi-member)
+  setAreaBounds: (sharedXMin: number, sharedXMax: number) => void;
 
   // History
   _history: Snapshot[];
@@ -259,8 +278,7 @@ export const useFlowStoreV3 = create<FlowStore>((set, get) => ({
       nodes: [],
       edges: [],
       groups: [],
-      selectedNodeId: undefined,
-      selectedEdgeId: undefined,
+      selection: null,
       editingNodeId: undefined,
       _history: [],
       _future: [],
@@ -280,8 +298,7 @@ export const useFlowStoreV3 = create<FlowStore>((set, get) => ({
       nodes: slot?.nodes ?? [],
       edges: slot?.edges ?? [],
       groups: slot?.groups ?? [],
-      selectedNodeId: undefined,
-      selectedEdgeId: undefined,
+      selection: null,
       editingNodeId: undefined,
       _history: [],
       _future: [],
@@ -351,8 +368,7 @@ export const useFlowStoreV3 = create<FlowStore>((set, get) => ({
       nodes: slot?.nodes ?? [],
       edges: slot?.edges ?? [],
       groups: slot?.groups ?? [],
-      selectedNodeId: undefined,
-      selectedEdgeId: undefined,
+      selection: null,
       editingNodeId: undefined,
       _history: [],
       _future: [],
@@ -396,18 +412,17 @@ export const useFlowStoreV3 = create<FlowStore>((set, get) => ({
     }
   },
 
-  // UI / Selection
-  selectedNodeId: undefined,
-  selectedEdgeId: undefined,
+  // UI / Selection (single source)
+  selection: null,
   editingNodeId: undefined,
   contextMenu: null,
   groupProposal: null,
 
-  selectNode: (id) => set({ selectedNodeId: id, selectedEdgeId: undefined, contextMenu: null }),
-  selectEdge: (id) => set({ selectedEdgeId: id, selectedNodeId: undefined, contextMenu: null }),
+  selectNode: (id) => set({ selection: { type: 'node', id }, contextMenu: null }),
+  selectEdge: (id) => set({ selection: { type: 'edge', id }, contextMenu: null }),
+  selectGroup: (id) => set({ selection: { type: 'group', id }, contextMenu: null }),
   clearSelection: () => set({
-    selectedNodeId: undefined,
-    selectedEdgeId: undefined,
+    selection: null,
     editingNodeId: undefined,
     _editSnapshotSaved: false,
     contextMenu: null,
@@ -422,7 +437,7 @@ export const useFlowStoreV3 = create<FlowStore>((set, get) => ({
       s._saveSnapshot();
       set({ _editSnapshotSaved: true });
     }
-    set({ editingNodeId: id, selectedNodeId: id, selectedEdgeId: undefined });
+    set({ editingNodeId: id, selection: { type: 'node', id } });
   },
   commitEditNode: () => set({ editingNodeId: undefined, _editSnapshotSaved: false }),
   cancelEditNode: () => {
@@ -484,7 +499,7 @@ export const useFlowStoreV3 = create<FlowStore>((set, get) => ({
   createNode: (type, position) => {
     get()._saveSnapshot();
     const meta = get().canvasMeta;
-    const area = meta ? getAreaForPosition(position.x, meta.members) : { isShared: false };
+    const area = meta ? getAreaForPosition(position.x, meta.members, meta) : { isShared: false };
     const node: FlowNodeData = {
       id: newId(type === 'source' ? 'src' : 'dst'),
       type,
@@ -500,7 +515,7 @@ export const useFlowStoreV3 = create<FlowStore>((set, get) => ({
     set({
       nodes: [...get().nodes, node],
       editingNodeId: node.id,
-      selectedNodeId: node.id,
+      selection: { type: 'node', id: node.id },
       contextMenu: null,
     });
   },
@@ -528,7 +543,7 @@ export const useFlowStoreV3 = create<FlowStore>((set, get) => ({
     set({
       nodes: [...nodes, sub],
       editingNodeId: sub.id,
-      selectedNodeId: sub.id,
+      selection: { type: 'node', id: sub.id },
       contextMenu: null,
     });
   },
@@ -545,7 +560,7 @@ export const useFlowStoreV3 = create<FlowStore>((set, get) => ({
 
     // Compute new area for multi-member canvas
     const newArea = canvasMeta && canvasMeta.members.length >= 2
-      ? getAreaForPosition(x, canvasMeta.members)
+      ? getAreaForPosition(x, canvasMeta.members, canvasMeta)
       : null;
 
     if (node.type === 'destination') {
@@ -583,9 +598,8 @@ export const useFlowStoreV3 = create<FlowStore>((set, get) => ({
   },
 
   deleteNode: (id) => {
-    const { nodes, edges, groups, selectedNodeId, _saveSnapshot } = get();
+    const { nodes, edges, groups, selection, _saveSnapshot } = get();
     _saveSnapshot();
-    // If deleting destination, also delete its sub
     const node = nodes.find((n) => n.id === id);
     let nextNodes = nodes.filter((n) => n.id !== id);
     if (node?.type === 'destination') {
@@ -597,12 +611,12 @@ export const useFlowStoreV3 = create<FlowStore>((set, get) => ({
     const nextGroups = groups
       .map((g) => ({ ...g, nodeIds: g.nodeIds.filter((nid) => !removedIds.has(nid)) }))
       .filter((g) => g.nodeIds.length >= 2);
+    const nextSelection: Selection = selection?.type === 'node' && removedIds.has(selection.id) ? null : selection;
     set({
       nodes: nextNodes,
       edges: nextEdges,
       groups: nextGroups,
-      selectedNodeId: removedIds.has(selectedNodeId ?? '') ? undefined : selectedNodeId,
-      selectedEdgeId: undefined,
+      selection: nextSelection,
       contextMenu: null,
     });
   },
@@ -720,11 +734,12 @@ export const useFlowStoreV3 = create<FlowStore>((set, get) => ({
   },
 
   deleteEdge: (edgeId) => {
-    const { edges, selectedEdgeId, _saveSnapshot } = get();
+    const { edges, selection, _saveSnapshot } = get();
     _saveSnapshot();
+    const nextSelection: Selection = selection?.type === 'edge' && selection.id === edgeId ? null : selection;
     set({
       edges: edges.filter((e) => e.id !== edgeId),
-      selectedEdgeId: selectedEdgeId === edgeId ? undefined : selectedEdgeId,
+      selection: nextSelection,
       contextMenu: null,
     });
   },
@@ -817,9 +832,10 @@ export const useFlowStoreV3 = create<FlowStore>((set, get) => ({
     const dropped = nodes.find((n) => n.id === droppedId);
     if (!dropped || dropped.type !== 'destination') return;
 
-    // Estimated node bounding box for overlap check
     const NODE_W = 160;
     const NODE_H = 80;
+    const PADDING = 14;
+    const HEADER_H = 22;
     const dx = dropped.x ?? 0;
     const dy = dropped.y ?? 0;
     const overlap = (a: { x: number; y: number }, b: { x: number; y: number }) =>
@@ -828,7 +844,41 @@ export const useFlowStoreV3 = create<FlowStore>((set, get) => ({
     const droppedName = normalizeMatchKey(dropped.name);
     const droppedAccount = normalizeMatchKey(dropped.account);
 
-    // Find another destination overlapping with same key
+    // 1. If dropped node is in a group, check if it left the group's box
+    if (dropped.groupId) {
+      const group = groups.find((g) => g.id === dropped.groupId);
+      if (group) {
+        let minX: number, minY: number, maxX: number, maxY: number;
+        if (group.bounds) {
+          minX = group.bounds.minX;
+          minY = group.bounds.minY;
+          maxX = group.bounds.maxX;
+          maxY = group.bounds.maxY;
+        } else {
+          const siblings = group.nodeIds
+            .filter((nid) => nid !== droppedId)
+            .map((nid) => nodes.find((n) => n.id === nid))
+            .filter((n): n is NonNullable<typeof n> => Boolean(n));
+          if (siblings.length === 0) return;
+          const xs = siblings.map((n) => n.x ?? 0);
+          const ys = siblings.map((n) => n.y ?? 0);
+          minX = Math.min(...xs) - PADDING;
+          minY = Math.min(...ys) - PADDING - HEADER_H;
+          maxX = Math.max(...xs) + NODE_W + PADDING;
+          maxY = Math.max(...ys) + NODE_H + PADDING;
+        }
+
+        const cx = dx + NODE_W / 2;
+        const cy = dy + NODE_H / 2;
+        const inside = cx >= minX && cx <= maxX && cy >= minY && cy <= maxY;
+        if (!inside) {
+          get().removeFromGroup(droppedId);
+          return;
+        }
+      }
+    }
+
+    // 2. Try to form/join group with overlapping destination of same key
     const target = nodes.find((n) => {
       if (n.id === droppedId) return false;
       if (n.type !== 'destination') return false;
@@ -838,7 +888,6 @@ export const useFlowStoreV3 = create<FlowStore>((set, get) => ({
     });
     if (!target) return;
 
-    // If target is in a group, add dropped to that group; else form new group
     if (target.groupId) {
       const group = groups.find((g) => g.id === target.groupId);
       if (group) {
@@ -847,7 +896,6 @@ export const useFlowStoreV3 = create<FlowStore>((set, get) => ({
       }
     }
     if (dropped.groupId) {
-      // Add target to dropped's group
       const group = groups.find((g) => g.id === dropped.groupId);
       if (group) {
         get().addToGroup(group.id, target.id);
@@ -865,6 +913,68 @@ export const useFlowStoreV3 = create<FlowStore>((set, get) => ({
       const node = nodes.find((n) => n.id === nid);
       return sum + (node?.amount ?? 0);
     }, 0);
+  },
+
+  setGroupBounds: (groupId, bounds) => {
+    set({
+      groups: get().groups.map((g) =>
+        g.id === groupId ? { ...g, bounds } : g,
+      ),
+    });
+  },
+
+  moveGroup: (groupId, dx, dy) => {
+    const { groups, nodes } = get();
+    const group = groups.find((g) => g.id === groupId);
+    if (!group) return;
+    const memberIds = new Set(group.nodeIds);
+    // Sub nodes attached to any member destination
+    const subIds = new Set(
+      nodes
+        .filter((n) => n.type === 'sub' && n.parentNodeId && memberIds.has(n.parentNodeId))
+        .map((n) => n.id),
+    );
+
+    set({
+      nodes: nodes.map((n) => {
+        if (memberIds.has(n.id) || subIds.has(n.id)) {
+          return { ...n, x: (n.x ?? 0) + dx, y: (n.y ?? 0) + dy };
+        }
+        return n;
+      }),
+      groups: groups.map((g) => {
+        if (g.id !== groupId || !g.bounds) return g;
+        return {
+          ...g,
+          bounds: {
+            minX: g.bounds.minX + dx,
+            minY: g.bounds.minY + dy,
+            maxX: g.bounds.maxX + dx,
+            maxY: g.bounds.maxY + dy,
+          },
+        };
+      }),
+    });
+  },
+
+  setAreaBounds: (sharedXMin, sharedXMax) => {
+    const meta = get().canvasMeta;
+    if (!meta) return;
+    const old = getAreaBounds(meta);
+    const dxMin = sharedXMin - old.sharedXMin;
+    const dxMax = sharedXMax - old.sharedXMax;
+
+    // Shift nodes that were in the side member areas so they stay relative to the area
+    const updatedNodes = get().nodes.map((n) => {
+      const x = n.x ?? 0;
+      if (x < old.sharedXMin) return { ...n, x: x + dxMin };
+      if (x > old.sharedXMax) return { ...n, x: x + dxMax };
+      return n;
+    });
+
+    const updated: CanvasMeta = { ...meta, areaBounds: { sharedXMin, sharedXMax }, updatedAt: new Date().toISOString() };
+    saveCanvasMeta(updated);
+    set({ canvasMeta: updated, nodes: updatedNodes });
   },
 
   // History

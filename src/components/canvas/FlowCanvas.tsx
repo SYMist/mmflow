@@ -1,13 +1,13 @@
-import React, { useEffect, useMemo, useRef } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   ReactFlow,
   Background,
   Controls,
-  useNodesState,
   useReactFlow,
   type Node as RFNode,
   type Edge as RFEdge,
   type Connection,
+  type NodeChange,
 } from '@xyflow/react';
 import { useFlowStoreV3 } from '../../store/flowStoreV3';
 import { FlowNode } from './FlowNode';
@@ -18,10 +18,10 @@ import { AreaOverlay } from './AreaOverlay';
 export const FlowCanvas: React.FC = () => {
   const {
     nodes, edges,
-    selectedNodeId, selectedEdgeId, editingNodeId,
+    selection, editingNodeId,
     selectNode, selectEdge, openNodeMenu, openPaneMenu,
     contextMenu, moveNode, clearSelection,
-    createEdge, reconnectEdge, deleteEdge,
+    createEdge, reconnectEdge,
     updateNode, deleteNode, changeNodeColor,
     startEditNode, commitEditNode, cancelEditNode,
     warningNodeIds, tryGroupOnDrop,
@@ -29,94 +29,73 @@ export const FlowCanvas: React.FC = () => {
 
   const isContextMenuOpen = contextMenu !== null;
   const { screenToFlowPosition } = useReactFlow();
-  const [rfNodes, setRfNodes, onNodesChange] = useNodesState<RFNode>([]);
-  const suppressNextPaneClickRef = useRef(false);
   const containerRef = useRef<HTMLDivElement | null>(null);
 
-  // Custom context menu handler
+  // Local override of positions during drag (RF visual smoothness without store thrash)
+  const [draggingPositions, setDraggingPositions] = useState<Record<string, { x: number; y: number }>>({});
+
+  const selectedNodeId = selection?.type === 'node' ? selection.id : undefined;
+  const selectedEdgeId = selection?.type === 'edge' ? selection.id : undefined;
+
+  // Custom right-click handler
   useEffect(() => {
     const handler = (event: MouseEvent) => {
       const container = containerRef.current;
       if (!container || !container.contains(event.target as Node)) return;
-
       event.preventDefault();
       event.stopPropagation();
-      suppressNextPaneClickRef.current = true;
-      window.setTimeout(() => { suppressNextPaneClickRef.current = false; }, 0);
 
       const nodeEl = (event.target as HTMLElement)?.closest('.react-flow__node') as HTMLElement | null;
       const nodeId = nodeEl?.getAttribute('data-id');
-
       if (nodeId) {
         selectNode(nodeId);
         openNodeMenu({ x: event.clientX, y: event.clientY, nodeId });
         return;
       }
-
       const fp = screenToFlowPosition({ x: event.clientX, y: event.clientY });
       openPaneMenu({ x: event.clientX, y: event.clientY, flowX: fp.x, flowY: fp.y });
     };
-
     window.addEventListener('contextmenu', handler, { capture: true });
     return () => window.removeEventListener('contextmenu', handler, { capture: true } as EventListenerOptions);
   }, [selectNode, openNodeMenu, openPaneMenu, screenToFlowPosition]);
 
   const warnings = useMemo(() => warningNodeIds(), [warningNodeIds, nodes, edges]);
 
-  // Sync nodes
-  useEffect(() => {
-    setRfNodes((prev) => {
-      const prevMap = new Map(prev.map((n) => [n.id, n]));
-      return nodes.map((node, index) => {
-        const existing = prevMap.get(node.id);
-        const isEditing = node.id === editingNodeId;
-        const isSelected = node.id === selectedNodeId;
-        const hasWarning = warnings.has(node.id);
+  // Derive RF nodes from store + dragging override (single source: Zustand)
+  const rfNodes = useMemo<RFNode[]>(() =>
+    nodes.map((node, index) => {
+      const isEditing = node.id === editingNodeId;
+      const isSelected = node.id === selectedNodeId;
+      const drag = draggingPositions[node.id];
+      const x = drag?.x ?? node.x ?? (node.type === 'source' ? 0 : node.type === 'destination' ? 350 : 200);
+      const y = drag?.y ?? node.y ?? index * 80;
 
-        if (
-          existing &&
-          existing.data.name === node.name &&
-          existing.data.account === node.account &&
-          existing.data.amount === node.amount &&
-          existing.data.color === node.color &&
-          existing.data.isEditing === isEditing &&
-          existing.data.hasWarning === hasWarning &&
-          existing.selected === isSelected &&
-          existing.position.x === (node.x ?? 0) &&
-          existing.position.y === (node.y ?? 0)
-        ) {
-          return existing;
-        }
-
-        return {
-          id: node.id,
-          type: 'moneyNode',
-          data: {
-            type: node.type,
-            name: node.name,
-            account: node.account,
-            amount: node.amount,
-            color: node.color,
-            isEditing,
-            hasWarning,
-            onRename: (v: string) => updateNode(node.id, { name: v }),
-            onChangeAccount: (v: string) => updateNode(node.id, { account: v }),
-            onChangeAmount: (v: number) => updateNode(node.id, { amount: v }),
-            onChangeColor: (c: string) => changeNodeColor(node.id, c),
-            onDelete: () => deleteNode(node.id),
-            onCommitEdit: commitEditNode,
-            onCancelEdit: cancelEditNode,
-          },
-          position: {
-            x: node.x ?? (node.type === 'source' ? 0 : node.type === 'destination' ? 350 : 200),
-            y: node.y ?? index * 80,
-          },
-          selected: isSelected,
-          draggable: !isEditing && node.type !== 'sub',
-        } as RFNode;
-      });
-    });
-  }, [nodes, selectedNodeId, editingNodeId, warnings, updateNode, changeNodeColor, deleteNode, commitEditNode, cancelEditNode, setRfNodes]);
+      return {
+        id: node.id,
+        type: 'moneyNode',
+        data: {
+          type: node.type,
+          name: node.name,
+          account: node.account,
+          amount: node.amount,
+          color: node.color,
+          isEditing,
+          hasWarning: warnings.has(node.id),
+          onRename: (v: string) => updateNode(node.id, { name: v }),
+          onChangeAccount: (v: string) => updateNode(node.id, { account: v }),
+          onChangeAmount: (v: number) => updateNode(node.id, { amount: v }),
+          onChangeColor: (c: string) => changeNodeColor(node.id, c),
+          onDelete: () => deleteNode(node.id),
+          onCommitEdit: commitEditNode,
+          onCancelEdit: cancelEditNode,
+        },
+        position: { x, y },
+        selected: isSelected,
+        // Click-to-select then drag: only the selected node is draggable
+        draggable: !isEditing && node.type !== 'sub' && isSelected,
+      } as RFNode;
+    }),
+  [nodes, selectedNodeId, editingNodeId, warnings, draggingPositions, updateNode, changeNodeColor, deleteNode, commitEditNode, cancelEditNode]);
 
   const rfEdges = useMemo<RFEdge[]>(() =>
     edges.map((edge) => ({
@@ -131,6 +110,39 @@ export const FlowCanvas: React.FC = () => {
     })),
   [edges, selectedEdgeId]);
 
+  const handleNodesChange = (changes: NodeChange[]) => {
+    // We only care about position changes here; selection is handled via onNodeClick
+    let dragChanges: Record<string, { x: number; y: number } | null> = {};
+    let commitMoves: Array<{ id: string; x: number; y: number }> = [];
+
+    for (const c of changes) {
+      if (c.type === 'position' && c.position) {
+        if (c.dragging) {
+          dragChanges[c.id] = c.position;
+        } else {
+          // drag end
+          commitMoves.push({ id: c.id, x: c.position.x, y: c.position.y });
+          dragChanges[c.id] = null;
+        }
+      }
+    }
+
+    if (Object.keys(dragChanges).length > 0) {
+      setDraggingPositions((prev) => {
+        const next = { ...prev };
+        for (const [id, pos] of Object.entries(dragChanges)) {
+          if (pos === null) delete next[id];
+          else next[id] = pos;
+        }
+        return next;
+      });
+    }
+    for (const m of commitMoves) {
+      moveNode(m.id, m.x, m.y);
+      tryGroupOnDrop(m.id);
+    }
+  };
+
   return (
     <div className="flow-canvas" ref={containerRef}>
       <ReactFlow
@@ -138,7 +150,7 @@ export const FlowCanvas: React.FC = () => {
         edgeTypes={{ moneyEdge: MoneyEdge }}
         nodes={rfNodes}
         edges={rfEdges}
-        onNodesChange={onNodesChange}
+        onNodesChange={handleNodesChange}
         fitView
         nodesConnectable
         panOnDrag={selectedNodeId || selectedEdgeId ? [2] : true}
@@ -146,12 +158,8 @@ export const FlowCanvas: React.FC = () => {
         onNodeClick={(_e, node) => selectNode(node.id)}
         onNodeDoubleClick={(_e, node) => startEditNode(node.id)}
         onEdgeClick={(_e, edge) => selectEdge(edge.id)}
-        onNodeDragStop={(_e, node) => {
-          moveNode(node.id, node.position.x ?? 0, node.position.y ?? 0);
-          tryGroupOnDrop(node.id);
-        }}
         onPaneClick={(event) => {
-          if (suppressNextPaneClickRef.current || isContextMenuOpen || event.button === 2) return;
+          if (isContextMenuOpen || event.button === 2) return;
           clearSelection();
         }}
         onConnect={(conn: Connection) => {

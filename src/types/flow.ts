@@ -45,6 +45,8 @@ export interface CanvasMeta {
   goal: CanvasGoal;
   createdAt: string;
   updatedAt: string;
+  /** Custom area boundaries (multi-member). If undefined, uses defaults. */
+  areaBounds?: { sharedXMin: number; sharedXMax: number };
 }
 
 export interface Group {
@@ -54,6 +56,8 @@ export interface Group {
   matchAccount: string;
   // Member node ids (destination nodes)
   nodeIds: string[];
+  /** Custom box bounds. If undefined, auto-fit to members. */
+  bounds?: { minX: number; minY: number; maxX: number; maxY: number };
 }
 
 export const MEMBER_TYPE_LABELS: Record<MemberType, string> = {

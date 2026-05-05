@@ -169,13 +169,15 @@ export const FlowNode: React.FC<any> = ({ data, selected, dragging }) => {
     <div
       className={`flow-node flow-node-type-${node.type} ${selected ? 'flow-node-selected' : ''} ${node.hasWarning ? 'flow-node-warning' : ''} ${isSub ? 'flow-node-sub' : ''}`}
       style={{
-        borderColor: node.hasWarning ? undefined : node.color,
+        borderColor: selected ? undefined : (node.hasWarning ? undefined : node.color),
         opacity: isDragging ? 0.7 : 1,
-        cursor: isDragging ? 'grabbing' : 'grab',
       }}
       title={node.hasWarning ? '분배 금액이 출발 금액을 초과합니다' : undefined}
     >
       {handles}
+      {selected && !isSub && (
+        <div className="selection-badge">선택됨 · 드래그로 이동</div>
+      )}
       {node.hasWarning && (
         <div className="flow-node-warning-badge" aria-label="경고">
           <svg width="10" height="10" viewBox="0 0 10 10" fill="none">
