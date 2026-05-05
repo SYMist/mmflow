@@ -9,9 +9,11 @@ export const CanvasPage: React.FC = () => {
     canvasMeta, contextMenu, closeMenu,
     createNode, createSubNode, deleteNode,
     nodes, groupProposal, acceptGroupProposal, dismissGroupProposal,
-    persist, selectedNodeId, selectedEdgeId, editingNodeId,
+    persist, selection, editingNodeId,
     deleteEdge, undo, redo,
   } = useFlowStoreV3();
+  const selectedNodeId = selection?.type === 'node' ? selection.id : undefined;
+  const selectedEdgeId = selection?.type === 'edge' ? selection.id : undefined;
 
   // Auto-save (debounced)
   const nodesRef = React.useRef(nodes);

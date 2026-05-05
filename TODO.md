@@ -1,7 +1,7 @@
 # Money Flow Planner — TODO
 
-> v3 모델 구현 완료(2026-05-05). 이전 v2 작업은 [v2 완료 항목](#v2-완료-항목-아카이브) 참조.
-> 상세: `docs/v3-development-plan.md`, `meetings/002-model-v3-definition-2026-05-05.md`
+> v3 모델 구현 완료(2026-05-05) → 안정화 완료(2026-05-06). 이전 v2 작업은 [v2 완료 항목](#v2-완료-항목-아카이브) 참조.
+> 상세: `docs/v3-development-plan.md`, `docs/progress-2026-05-06.md`, `meetings/002-model-v3-definition-2026-05-05.md`
 
 ---
 
@@ -54,6 +54,16 @@
 - [x] **G-3** TODO.md / CLAUDE.md v3 반영
 - [ ] **H-1** v3 핵심 시나리오 수동 테스트 (사용자 검증 대기)
 - [x] **H-2** 빌드/타입체크 통과
+
+### v3 안정화 (2026-05-06)
+- [x] CSS 높이 체인 단순화 (Chrome 렌더 실패 해결)
+- [x] 노드 상태 단일 소스 (useNodesState 제거, draggingPositions 분리) — 영역 리사이즈 시 노드 사라짐 버그 해결
+- [x] 선택 상태 통합 (`Selection` 타입 단일 키)
+- [x] React Flow z-index 구조 파악 + GroupOverlay/AreaOverlay zIndex 정정 — 그룹 클릭 작동
+- [x] 노드/그룹 클릭-선택 패턴 + 시각 표시 (보더, 발광, 뱃지)
+- [x] 영역 리사이즈 시 노드 함께 이동
+- [x] 그룹 라벨 드래그로 그룹 전체 이동 (멤버 + 서브 노드 + bounds)
+- [x] 그룹 박스 밖으로 노드 드롭 시 자동 그룹 탈퇴
 
 ---
 
